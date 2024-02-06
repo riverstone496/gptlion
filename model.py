@@ -334,6 +334,8 @@ class GPT(nn.Module):
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
         elif optimizer_name == 'lionw':
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
+        elif optimizer_name == 'adaptive_lion':
+            optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
         elif optimizer_name == 'sophiag':
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas, rho=rho)   
         else:
