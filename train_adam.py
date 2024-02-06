@@ -268,6 +268,15 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
+def log_optimizer_state(model, iteration):
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            wandb.log({
+                "iter": iteration,
+                f"grad/{name}": wandb.Histogram(param.grad.cpu().detach().numpy()),
+                f"weight/{name}": wandb.Histogram(param.cpu().detach().numpy())
+            }, step=iteration)
+
 # logging
 if args.wandb and master_process:
     import wandb
@@ -302,6 +311,7 @@ while True:
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
             }, step=iter_num)
+            log_optimizer_state(model, iter_num)
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
             if iter_num > 0:
