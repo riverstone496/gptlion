@@ -268,14 +268,14 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
-def log_optimizer_state(model, iteration):
+def log_optimizer_state(model):
+    grad = {}
+    weight = {}
     for name, param in model.named_parameters():
         if param.grad is not None:
-            wandb.log({
-                "iter": iteration,
-                f"grad/{name}": wandb.Histogram(param.grad.cpu().detach().numpy()),
-                f"weight/{name}": wandb.Histogram(param.cpu().detach().numpy())
-            }, step=iteration)
+            grad[name] = torch.norm(param.grad)
+            weight[name] = torch.norm(param)
+    return weight, grad
 
 # logging
 if args.wandb and master_process:
@@ -311,7 +311,6 @@ while True:
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
             }, step=iter_num)
-            log_optimizer_state(model, iter_num)
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
             if iter_num > 0:
@@ -363,6 +362,10 @@ while True:
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
+
+    if iter_num % log_interval == 0 and master_process:
+        weight_dict, grad_dict = log_optimizer_state(model)
+    
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 
@@ -396,7 +399,9 @@ while True:
                 "lr": lr,
                 "param_norm": total_param_norm,
                 "momentum_norm" : momentum_norm,
-                "train/clip_rate": clip_time / (iter_num + 1)
+                "train/clip_rate": clip_time / (iter_num + 1),
+                "weight/":weight_dict,
+                "grad/":grad_dict
             }, step=iter_num)
     iter_num += 1
     local_iter_num += 1
