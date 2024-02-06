@@ -62,7 +62,15 @@ parser.add_argument("--dtype", type=str, default='bfloat16', choices=['float32',
 parser.add_argument("--compile", action='store_true', help="Compile the model for performance")
 parser.add_argument("--scale_attn_by_inverse_layer_idx", action='store_true', help="Scale attention by inverse layer index")
 
+parser.add_argument('--wandb', action='store_false', default=True)
+
 args = parser.parse_args()  # Parse arguments
+
+try:
+    os.environ["WANDB_HOST"] = os.environ.get('PJM_JOBID')
+    args.job_id = os.environ.get('PJM_JOBID')
+except:
+    print('WANDB_HOST not set')
 
 # Use parsed arguments
 out_dir = args.out_dir
@@ -72,9 +80,6 @@ eval_iters = args.eval_iters
 eval_only = args.eval_only
 always_save_checkpoint = args.always_save_checkpoint
 init_from = args.init_from
-wandb_log = args.wandb_log
-wandb_project = args.wandb_project
-wandb_run_name = args.wandb_run_name
 dataset = args.dataset
 gradient_accumulation_steps = args.gradient_accumulation_steps
 batch_size = args.batch_size
@@ -107,9 +112,8 @@ scale_attn_by_inverse_layer_idx = args.scale_attn_by_inverse_layer_idx
 
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
-exec(open('configurator.py').read()) # overrides from command line or config file
-config = {k: globals()[k] for k in config_keys} # will be useful for logging
-# -----------------------------------------------------------------------------
+#exec(open('configurator.py').read()) # overrides from command line or config file
+config = vars(args).copy()# -----------------------------------------------------------------------------
 
 # various inits, derived attributes, I/O setup
 ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
@@ -265,9 +269,12 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 # logging
-if wandb_log and master_process:
+if args.wandb and master_process:
     import wandb
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+    wandb.init( config=config,
+                entity=os.environ.get('WANDB_ENTITY', None),
+                project=os.environ.get('WANDB_PROJECT', None),
+                )
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
@@ -287,7 +294,7 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        if wandb_log:
+        if args.wandb:
             wandb.log({
                 "iter": iter_num,
                 "train/loss": losses['train'],
@@ -372,7 +379,7 @@ while True:
         for jj in range(LL):
             momentum_norm += (optimizer.state_dict()['state'][jj]['exp_avg'].detach().norm(2)) ** 2
         momentum_norm = torch.sqrt(momentum_norm).item()
-        if wandb_log:
+        if args.wandb:
             wandb.log({
                 "iter": iter_num,
                 "train/loss": lossf,

@@ -3,9 +3,9 @@ import inspect
 from dataclasses import dataclass
 from sophia import SophiaG
 from optimizers.lion import Lion
-from optimizers.lionw import DecoupledLionW
-from optimizers.adaptive_lion import DecoupledAdaLRLion
-from optimizers.lion8b import DecoupledLionW_8bit
+# from optimizers.lionw import DecoupledLionW
+# from optimizers.adaptive_lion import DecoupledAdaLRLion
+# from optimizers.lion8b import DecoupledLionW_8bit
 
 import torch
 import torch.nn as nn
@@ -14,9 +14,9 @@ from torch.nn import functional as F
 optimizer_dict = {'adamw': torch.optim.AdamW,
                   'sophiag': SophiaG,
                   'lion': Lion,
-                  'lionw':DecoupledLionW,
-                  'adaptive_lion':DecoupledAdaLRLion,
-                  'lion8b':DecoupledLionW_8bit
+                #   'lionw':DecoupledLionW,
+                #   'adaptive_lion':DecoupledAdaLRLion,
+                #   'lion8b':DecoupledLionW_8bit
                  }
 
 # @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
