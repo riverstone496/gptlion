@@ -2,13 +2,21 @@ import math
 import inspect
 from dataclasses import dataclass
 from sophia import SophiaG
+from optimizers.lion import Lion
+from optimizers.lionw import DecoupledLionW
+from optimizers.adaptive_lion import DecoupledAdaLRLion
+from optimizers.lion8b import DecoupledLionW_8bit
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
 optimizer_dict = {'adamw': torch.optim.AdamW,
-                  'sophiag': SophiaG
+                  'sophiag': SophiaG,
+                  'lion': Lion,
+                  'lionw':DecoupledLionW,
+                  'adaptive_lion':DecoupledAdaLRLion,
+                  'lion8b':DecoupledLionW_8bit
                  }
 
 # @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
@@ -322,6 +330,10 @@ class GPT(nn.Module):
             print(f"using fused AdamW: {use_fused}")
             extra_args = dict(fused=True) if use_fused else dict()
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        elif optimizer_name == 'lion':
+            optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
+        elif optimizer_name == 'lionw':
+            optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
         elif optimizer_name == 'sophiag':
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas, rho=rho)   
         else:
