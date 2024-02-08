@@ -62,6 +62,8 @@ parser.add_argument("--dtype", type=str, default='bfloat16', choices=['float32',
 parser.add_argument("--compile", action='store_true', help="Compile the model for performance")
 parser.add_argument("--scale_attn_by_inverse_layer_idx", action='store_true', help="Scale attention by inverse layer index")
 
+parser.add_argument('--log_optimizer_state', action='store_true', default=False)
+
 parser.add_argument('--wandb', action='store_false', default=True)
 
 args = parser.parse_args()  # Parse arguments
@@ -219,6 +221,14 @@ if block_size < model.config.block_size:
     model_args['block_size'] = block_size # so that the checkpoint will have the right value
 model.to(device)
 
+if args.log_optimizer_state:
+    param_name_dict = {}
+    prev_grad_dict = {}
+    prev_momentum_dict = {}
+    for name, param in model.named_parameters():
+        param_name_dict[param] = name
+    cos_func = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
+
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
 
@@ -268,7 +278,7 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio)) # coeff ranges 0..1
     return min_lr + coeff * (learning_rate - min_lr)
 
-def log_optimizer_state(model):
+def get_param_grad_norm(model):
     grad = {}
     weight = {}
     for name, param in model.named_parameters():
@@ -364,7 +374,32 @@ while True:
     scaler.update()
 
     if iter_num % log_interval == 0 and master_process:
-        weight_dict, grad_dict = log_optimizer_state(model)
+        weight_dict, grad_dict = get_param_grad_norm(model)
+        if args.log_optimizer_state:
+            state_info = {}
+            for p in optimizer.state.keys():
+                param_name = param_name_dict[p]
+                grad = p.grad
+                momentum = optimizer.state[p]["exp_avg"]
+                state_info['grad_norm/'][param_name] = torch.norm(p.grad).item()
+                state_info['momentum_norm/'][param_name] = torch.norm(momentum).item()
+                state_info['grad_norm_element/'][param_name] = torch.abs(p.grad).mean(dtype=torch.float32).item()
+                state_info['momentum_norm_element/'][param_name] = torch.abs(momentum).mean(dtype=torch.float32).item()
+
+                if param_name in prev_grad_dict.keys():
+                    prev_grad = prev_grad_dict[param_name]
+                    state_info['grad_relative_error/'][param_name] = torch.norm(grad - prev_grad).item() / state_info['grad_norm/'][param_name]
+                    state_info['grad_relative_error_element/'][param_name] = torch.abs(grad - prev_grad).mean(dtype=torch.float32).item() / state_info['grad_norm_element/'][param_name]
+                    state_info['grad_cosine_sim/'][param_name] = cos_func(grad, prev_grad)
+                    state_info['grad_norm_ratio/'][param_name] = state_info['grad_norm/'][param_name] / torch.norm(prev_grad).item()
+                    state_info['grad_norm_element_ratio/'][param_name] = state_info['grad_norm_element/'][param_name] / torch.abs(prev_grad).mean(dtype=torch.float32).item()
+                if param_name in prev_momentum_dict.keys():
+                    prev_momentum = prev_momentum_dict[param_name]
+                    state_info['momentum_relative_error/'][param_name] = torch.norm(momentum - prev_momentum) / state_info['momentum_norm/'][param_name]
+                    state_info['momentum_relative_error_element/'][param_name] = torch.abs(momentum - prev_momentum).mean(dtype=torch.float32).item() / state_info['momentum_norm_element/'][param_name]
+                    state_info['momentum_cosine_sim/'][param_name] = cos_func(momentum, prev_momentum)
+                    state_info['momentum_norm_ratio/'][param_name] = state_info['momentum_norm/'][param_name]/ torch.norm(prev_momentum).item()
+                    state_info['momentum_element_ratio/'][param_name] = state_info['momentum_norm_element/'][param_name] / torch.abs(prev_momentum).mean(dtype=torch.float32).item()
     
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
@@ -393,7 +428,7 @@ while True:
             momentum_norm += (optimizer.state_dict()['state'][jj]['exp_avg'].detach().norm(2)) ** 2
         momentum_norm = torch.sqrt(momentum_norm).item()
         if args.wandb:
-            wandb.log({
+            log_dict = {
                 "iter": iter_num,
                 "train/loss": lossf,
                 "lr": lr,
@@ -402,7 +437,10 @@ while True:
                 "train/clip_rate": clip_time / (iter_num + 1),
                 "weight/":weight_dict,
                 "grad/":grad_dict
-            }, step=iter_num)
+            }
+            if args.log_optimizer_state:
+                log_dict.update(state_dict)
+            wandb.log(log_dict, step=iter_num)
     iter_num += 1
     local_iter_num += 1
 
