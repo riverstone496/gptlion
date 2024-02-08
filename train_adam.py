@@ -63,6 +63,7 @@ parser.add_argument("--compile", action='store_true', help="Compile the model fo
 parser.add_argument("--scale_attn_by_inverse_layer_idx", action='store_true', help="Scale attention by inverse layer index")
 
 parser.add_argument('--log_optimizer_state', action='store_true', default=False)
+parser.add_argument("--state_interval", type=int, default=1, help="Interval to the previous optimizer state")
 
 parser.add_argument('--wandb', action='store_false', default=True)
 
@@ -223,6 +224,7 @@ model.to(device)
 
 if args.log_optimizer_state:
     param_name_dict = {}
+    prev_weight_dict = {}
     prev_grad_dict = {}
     prev_momentum_dict = {}
     for name, param in model.named_parameters():
@@ -374,18 +376,27 @@ while True:
     scaler.update()
 
     if iter_num % log_interval == 0 and master_process:
-        weight_dict, grad_dict = get_param_grad_norm(model)
         if args.log_optimizer_state:
             state_info = {}
             for p in optimizer.state.keys():
                 param_name = param_name_dict[p]
+                weight = p.data
                 grad = p.grad
                 momentum = optimizer.state[p]["exp_avg"]
+                state_info['weight_norm/'][param_name] = torch.norm(p.data).item()
                 state_info['grad_norm/'][param_name] = torch.norm(p.grad).item()
                 state_info['momentum_norm/'][param_name] = torch.norm(momentum).item()
+                state_info['weight_norm_element/'][param_name] = torch.abs(p.data).mean(dtype=torch.float32).item()
                 state_info['grad_norm_element/'][param_name] = torch.abs(p.grad).mean(dtype=torch.float32).item()
                 state_info['momentum_norm_element/'][param_name] = torch.abs(momentum).mean(dtype=torch.float32).item()
 
+                if param_name in prev_weight_dict.keys():
+                    prev_weight = prev_weight_dict[param_name]
+                    state_info['weight_relative_error/'][param_name] = torch.norm(weight - prev_weight).item() / state_info['weight_norm/'][param_name]
+                    state_info['weight_relative_error_element/'][param_name] = torch.abs(grad - prev_weight).mean(dtype=torch.float32).item() / state_info['weight_norm_element/'][param_name]
+                    state_info['weight_cosine_sim/'][param_name] = cos_func(weight, prev_weight)
+                    state_info['weight_norm_ratio/'][param_name] = state_info['weight_norm/'][param_name] / torch.norm(prev_weight).item()
+                    state_info['weight_norm_element_ratio/'][param_name] = state_info['weight_norm_element/'][param_name] / torch.abs(prev_weight).mean(dtype=torch.float32).item()
                 if param_name in prev_grad_dict.keys():
                     prev_grad = prev_grad_dict[param_name]
                     state_info['grad_relative_error/'][param_name] = torch.norm(grad - prev_grad).item() / state_info['grad_norm/'][param_name]
@@ -400,6 +411,15 @@ while True:
                     state_info['momentum_cosine_sim/'][param_name] = cos_func(momentum, prev_momentum)
                     state_info['momentum_norm_ratio/'][param_name] = state_info['momentum_norm/'][param_name]/ torch.norm(prev_momentum).item()
                     state_info['momentum_element_ratio/'][param_name] = state_info['momentum_norm_element/'][param_name] / torch.abs(prev_momentum).mean(dtype=torch.float32).item()
+    
+    # Save Previous Information
+    if iter_num % log_interval == log_interval-args.state_interval and args.log_optimizer_state and master_process:
+        if args.log_optimizer_state:
+            for p in optimizer.state.keys():
+                param_name = param_name_dict[p]
+                prev_weight_dict[param_name] = p.data.detach().clone()
+                prev_grad_dict[param_name] = p.grad.detach().clone()
+                prev_momentum_dict[param_name] = optimizer.state[p]["exp_avg"].detach().clone()
     
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
@@ -435,8 +455,6 @@ while True:
                 "param_norm": total_param_norm,
                 "momentum_norm" : momentum_norm,
                 "train/clip_rate": clip_time / (iter_num + 1),
-                "weight/":weight_dict,
-                "grad/":grad_dict
             }
             if args.log_optimizer_state:
                 log_dict.update(state_dict)
