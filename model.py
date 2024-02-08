@@ -1,7 +1,7 @@
 import math
 import inspect
 from dataclasses import dataclass
-from sophia import SophiaG
+from optimizers.sophia import SophiaG
 from optimizers.lion import Lion
 # from optimizers.lionw import DecoupledLionW
 # from optimizers.adaptive_lion import DecoupledAdaLRLion
