@@ -428,7 +428,7 @@ while True:
                     state_info['momentum_norm_element_ratio/'][param_name] = state_info['momentum_norm_element/'][param_name] / torch.abs(prev_momentum).mean(dtype=torch.float32).item()
     
     # Save Previous Information
-    if iter_num % log_interval == log_interval-args.state_interval and args.log_optimizer_state and master_process:
+    if iter_num % log_interval == log_interval-args.state_interval and args.log_optimizer_state and master_process and master_process:
         if args.log_optimizer_state:
             for p in optimizer.state.keys():
                 param_name = param_name_dict[p]
@@ -436,7 +436,7 @@ while True:
                 prev_grad_dict[param_name] = p.grad.detach().clone()
                 prev_momentum_dict[param_name] = optimizer.state[p]["exp_avg"].detach().clone()
 
-    if str(iter_num) in args.log_weight_iters:
+    if str(iter_num) in args.log_weight_iters and master_process:
         if args.wandb:
             log_dict = {
                 "iter": iter_num,
