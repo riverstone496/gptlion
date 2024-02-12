@@ -392,7 +392,8 @@ while True:
             state_info = {  'weight_norm/':{},'grad_norm/':{},'momentum_norm/':{},"weight_norm_element/":{},'grad_norm_element/':{},'momentum_norm_element/':{},
                             'weight_relative_error/':{},'weight_relative_error_element/':{},'weight_cosine_sim/':{},'weight_norm_ratio/':{},'weight_norm_element_ratio/':{},
                             'grad_relative_error/':{},'grad_relative_error_element/':{},'grad_cosine_sim/':{},'grad_norm_ratio/':{},'grad_norm_element_ratio/':{},
-                            'momentum_relative_error/':{},'momentum_relative_error_element/':{},'momentum_cosine_sim/':{},'momentum_norm_ratio/':{},'momentum_norm_element_ratio/':{}}
+                            'momentum_relative_error/':{},'momentum_relative_error_element/':{},'momentum_cosine_sim/':{},'momentum_norm_ratio/':{},'momentum_norm_element_ratio/':{},
+                            'update_relative_error/':{},'update_relative_error_element/':{},'update_cosine_sim/':{},'update_norm_ratio/':{},'update_norm_element_ratio/':{}}
             for p in optimizer.state.keys():
                 param_name = param_name_dict[p]
                 weight = p.data
@@ -426,7 +427,15 @@ while True:
                     state_info['momentum_cosine_sim/'][param_name] = cos_func(momentum.view(-1), prev_momentum.view(-1))
                     state_info['momentum_norm_ratio/'][param_name] = state_info['momentum_norm/'][param_name]/ torch.norm(prev_momentum).item()
                     state_info['momentum_norm_element_ratio/'][param_name] = state_info['momentum_norm_element/'][param_name] / torch.abs(prev_momentum).mean(dtype=torch.float32).item()
-    
+                if param_name in prev_grad_dict.keys() and param_name in prev_momentum_dict.keys():
+                    update = momentum.clone().mul_(beta1).add(grad, alpha=1 - beta1).sign_()
+                    prev_update = prev_momentum.clone().mul_(beta1).add(prev_grad, alpha=1 - beta1).sign_()
+                    state_info['update_relative_error/'][param_name] = torch.norm(update - prev_update) / torch.norm(update)
+                    state_info['update_relative_error_element/'][param_name] = torch.abs(update - prev_update).mean(dtype=torch.float32).item() / torch.abs(update).mean(dtype=torch.float32).item()
+                    state_info['update_cosine_sim/'][param_name] = cos_func(update.view(-1), prev_update.view(-1))
+                    state_info['update_norm_ratio/'][param_name] = torch.norm(update)/ torch.norm(prev_update).item()
+                    state_info['update_norm_element_ratio/'][param_name] = torch.abs(update).mean(dtype=torch.float32).item() / torch.abs(prev_update).mean(dtype=torch.float32).item()
+
     # Save Previous Information
     if iter_num % log_interval == log_interval-args.state_interval and args.log_optimizer_state and master_process and master_process:
         if args.log_optimizer_state:
