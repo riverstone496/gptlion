@@ -3,6 +3,7 @@ import inspect
 from dataclasses import dataclass
 from optimizers.sophia import SophiaG
 from optimizers.lion import Lion
+from optimizers.shampoo import Shampoo, ShampooHyperParams
 # from optimizers.lionw import DecoupledLionW
 # from optimizers.adaptive_lion import DecoupledAdaLRLion
 # from optimizers.lion8b import DecoupledLionW_8bit
@@ -14,6 +15,7 @@ from torch.nn import functional as F
 optimizer_dict = {'adamw': torch.optim.AdamW,
                   'sophiag': SophiaG,
                   'lion': Lion,
+                  'shampoo': Shampoo,
                 #   'lionw':DecoupledLionW,
                 #   'adaptive_lion':DecoupledAdaLRLion,
                 #   'lion8b':DecoupledLionW_8bit
@@ -338,6 +340,15 @@ class GPT(nn.Module):
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
         elif optimizer_name == 'sophiag':
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas, rho=rho)   
+        elif optimizer_name == 'shampoo':
+            hyperparams = ShampooHyperParams(beta2 = betas[1],
+                                        matrix_eps = 1e-8, 
+                                        start_preconditioning_step = 25,
+                                        preconditioning_compute_steps = 10,
+                                        statistics_compute_steps = 1,
+                                        block_size = 5000,
+                                        graft_type='AdaGrad')
+            optimizer = Shampoo(optim_groups, lr=learning_rate, momentum=betas[0] ,hyperparams=hyperparams)
         else:
             raise ValueError('Invalid optimizer.')
         return optimizer

@@ -348,17 +348,17 @@ while True:
                 }
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
-        if iter_num % (eval_interval * 5) == 0:
-            checkpoint = {
-                'model': raw_model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'model_args': model_args,
-                'iter_num': iter_num,
-                'best_val_loss': best_val_loss,
-                'config': config,
-            }
-            print(f"saving checkpoint to {out_dir}")
-            torch.save(checkpoint, os.path.join(out_dir, 'ckpt_'+str(iter_num)+'.pt'))
+    if str(iter_num) in args.log_weight_iters and master_process:
+        checkpoint = {
+            'model': raw_model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'model_args': model_args,
+            'iter_num': iter_num,
+            'best_val_loss': best_val_loss,
+            'config': config,
+        }
+        print(f"saving checkpoint to {out_dir}")
+        torch.save(checkpoint, os.path.join(out_dir, 'ckpt_'+str(iter_num)+'.pt'))
     if iter_num == 0 and eval_only:
         break
 
@@ -453,9 +453,13 @@ while True:
             for p in optimizer.state.keys():
                 param_name = param_name_dict[p]
                 grad = p.grad
-                momentum = optimizer.state[p]["exp_avg"]
                 log_dict['gradient/'+param_name] = wandb.Histogram(grad.cpu().detach().numpy())
-                log_dict['momentum/'+param_name] = wandb.Histogram(momentum.cpu().detach().numpy())
+                if "exp_avg" in optimizer.state[p]:
+                    momentum = optimizer.state[p]["exp_avg"]
+                    log_dict['momentum/'+param_name] = wandb.Histogram(momentum.cpu().detach().numpy())
+                if "momentum" in optimizer.state[p]:
+                    momentum = optimizer.state[p]["momentum"]
+                    log_dict['momentum/'+param_name] = wandb.Histogram(momentum.cpu().detach().numpy())
             wandb.log(log_dict, step=iter_num)
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
@@ -481,7 +485,10 @@ while True:
         momentum_norm = 0
         LL = len(optimizer.state_dict()['state'])
         for jj in range(LL):
-            momentum_norm += (optimizer.state_dict()['state'][jj]['exp_avg'].detach().norm(2)) ** 2
+            if 'exp_avg' in optimizer.state_dict()['state'][jj]:
+                momentum_norm += (optimizer.state_dict()['state'][jj]['exp_avg'].detach().norm(2)) ** 2
+            if 'momentum' in optimizer.state_dict()['state'][jj]:
+                momentum_norm += (optimizer.state_dict()['state'][jj]['momentum'].detach().norm(2)) ** 2
         momentum_norm = torch.sqrt(momentum_norm).item()
         if args.wandb:
             log_dict = {
