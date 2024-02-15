@@ -3,7 +3,7 @@ import inspect
 from dataclasses import dataclass
 from optimizers.sophia import SophiaG
 from optimizers.lion import Lion
-from optimizers.shampoo import Shampoo, ShampooHyperParams
+from optimizers.shampoo import Shampoo, ShampooHyperParams, LayerwiseGrafting
 # from optimizers.lionw import DecoupledLionW
 # from optimizers.adaptive_lion import DecoupledAdaLRLion
 # from optimizers.lion8b import DecoupledLionW_8bit
@@ -347,7 +347,7 @@ class GPT(nn.Module):
                                         preconditioning_compute_steps = 10,
                                         statistics_compute_steps = 1,
                                         block_size = 5000,
-                                        graft_type='AdaGrad')
+                                        graft_type=LayerwiseGrafting.ADAGRAD)
             optimizer = Shampoo(optim_groups, lr=learning_rate, momentum=betas[0] ,hyperparams=hyperparams)
         else:
             raise ValueError('Invalid optimizer.')
