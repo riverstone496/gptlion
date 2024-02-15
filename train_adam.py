@@ -234,14 +234,13 @@ if block_size < model.config.block_size:
     model_args['block_size'] = block_size # so that the checkpoint will have the right value
 model.to(device)
 
-if args.log_optimizer_state:
-    param_name_dict = {}
-    prev_weight_dict = {}
-    prev_grad_dict = {}
-    prev_momentum_dict = {}
-    for name, param in model.named_parameters():
-        param_name_dict[param] = name
-    cos_func = torch.nn.CosineSimilarity(dim=0)
+param_name_dict = {}
+prev_weight_dict = {}
+prev_grad_dict = {}
+prev_momentum_dict = {}
+for name, param in model.named_parameters():
+    param_name_dict[param] = name
+cos_func = torch.nn.CosineSimilarity(dim=0)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
@@ -387,7 +386,7 @@ while True:
     scaler.step(optimizer)
     scaler.update()
 
-    if iter_num % log_interval == 0 and master_process:
+    if iter_num % log_interval == 0 and args.log_optimizer_state and master_process:
         if args.log_optimizer_state:
             state_info = {  'weight_norm/':{},'grad_norm/':{},'momentum_norm/':{},"weight_norm_element/":{},'grad_norm_element/':{},'momentum_norm_element/':{},
                             'weight_relative_error/':{},'weight_relative_error_element/':{},'weight_cosine_sim/':{},'weight_norm_ratio/':{},'weight_norm_element_ratio/':{},
@@ -437,7 +436,7 @@ while True:
                     state_info['update_norm_element_ratio/'][param_name] = torch.abs(update).mean(dtype=torch.float32).item() / torch.abs(prev_update).mean(dtype=torch.float32).item()
 
     # Save Previous Information
-    if iter_num % log_interval == log_interval-args.state_interval and args.log_optimizer_state and master_process and master_process:
+    if iter_num % log_interval == log_interval-args.state_interval and args.log_optimizer_state and master_process:
         if args.log_optimizer_state:
             for p in optimizer.state.keys():
                 param_name = param_name_dict[p]
