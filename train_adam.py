@@ -67,6 +67,8 @@ parser.add_argument("--state_interval", type=int, default=1, help="Interval to t
 parser.add_argument("--log_weight_iters", type=str, default='None', help="Interval to the previous optimizer state")
 parser.add_argument('--ckpo_with_current_time', action='store_true', default=False)
 
+parser.add_argument("--momentum_sync_freq", type=int, default=1, help="Frequency for sync momentum")
+
 parser.add_argument('--wandb', action='store_false', default=True)
 
 args = parser.parse_args()  # Parse arguments
@@ -383,8 +385,13 @@ while True:
         if total_norm.item() > grad_clip:
             clip_time += 1
     # step the optimizer and scaler if training in fp16
-    scaler.step(optimizer)
-    scaler.update()
+    if args.optimizer_name == 'lion_mshift' or args.optimizer_name == 'lion_mvote':
+        with model.no_sync():
+            scaler.step(optimizer, sync_momentum = iter_num % args.momentum_sync_freq)
+            scaler.update()
+    else:
+        scaler.step(optimizer)
+        scaler.update()
 
     if iter_num % log_interval == 0 and args.log_optimizer_state and master_process:
         if args.log_optimizer_state:

@@ -3,6 +3,8 @@ import inspect
 from dataclasses import dataclass
 from optimizers.sophia import SophiaG
 from optimizers.lion import Lion
+from optimizers.lion_mshift import Lion_mshift
+from optimizers.lion_mvote import Lion_MVote
 from optimizers.shampoo import Shampoo, ShampooHyperParams, LayerwiseGrafting
 # from optimizers.lionw import DecoupledLionW
 # from optimizers.adaptive_lion import DecoupledAdaLRLion
@@ -15,6 +17,8 @@ from torch.nn import functional as F
 optimizer_dict = {'adamw': torch.optim.AdamW,
                   'sophiag': SophiaG,
                   'lion': Lion,
+                  'lion_mshift': Lion_mshift,
+                  'lion_mvote': Lion_MVote,
                   'shampoo': Shampoo,
                 #   'lionw':DecoupledLionW,
                 #   'adaptive_lion':DecoupledAdaLRLion,
@@ -332,7 +336,7 @@ class GPT(nn.Module):
             print(f"using fused AdamW: {use_fused}")
             extra_args = dict(fused=True) if use_fused else dict()
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        elif optimizer_name == 'lion':
+        elif optimizer_name == 'lion' or optimizer_name == 'lion_mshift' or optimizer_name == 'lion_mvote':
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
         elif optimizer_name == 'lionw':
             optimizer = opt_func(optim_groups, lr=learning_rate, betas=betas)
