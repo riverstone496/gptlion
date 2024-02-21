@@ -51,7 +51,7 @@ def main():
     optimizer.load_state_dict(optimizer_state_dict)
 
     exp_avg_l1_norms = []
-    grad_norms = []
+    exp_avg_l1_norms_max = []
     for group in optimizer.param_groups:
         for p in group["params"]:
             state = optimizer.state[p]
@@ -60,17 +60,31 @@ def main():
                 exp_avg_norm_l1 = torch.abs(exp_avg).mean(dtype=torch.float32).item()
                 exp_avg_l1_norms.append(exp_avg_norm_l1)
 
-    fig, axs = plt.subplots(1, 2, figsize=(4, 2))
+                exp_avg_norm_l1_max = torch.abs(exp_avg).max().item()
+                exp_avg_l1_norms_max.append(exp_avg_norm_l1_max)
+
+    fig, axs = plt.subplots(1, 4, figsize=(6, 2))
 
     # exp_avgのL1ノルムの分布、i=0は通常スケール、i=1はログスケール
     axs[0].hist(exp_avg_l1_norms, bins=30, alpha=0.75)
-    axs[0].set_title('exp_avg L1 Norms')
+    axs[0].set_title('Mean exp_avg L1 Norms')
     axs[0].set_xlabel('Norm Value')
 
     exp_avg_l1_norms_log = np.log10(exp_avg_l1_norms)
     axs[1].hist(exp_avg_l1_norms_log, bins=30, alpha=0.75)  # log=Trueを追加
-    axs[1].set_title('exp_avg L1 Norms (Log Scale)')
+    axs[1].set_title('Mean exp_avg L1 Norms\n(Log Scale)')
     axs[1].set_xlabel(f'log_10 (Norm Value)')
+
+    # exp_avgのL1ノルムの分布、i=0は通常スケール、i=1はログスケール
+    axs[2].hist(exp_avg_l1_norms_max, bins=30, alpha=0.75)
+    axs[2].set_title('Max exp_avg L1 Norms')
+    axs[2].set_xlabel('Norm Value')
+
+    exp_avg_l1_norms_max_log = np.log10(exp_avg_l1_norms_max)
+    axs[3].hist(exp_avg_l1_norms_max_log, bins=30, alpha=0.75)  # log=Trueを追加
+    axs[3].set_title('Max exp_avg L1 Norms\n(Log Scale)')
+    axs[3].set_xlabel(f'log_10 (Norm Value)')
+
     plt.tight_layout()
 
     # PDFとして保存
