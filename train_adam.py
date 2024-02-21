@@ -12,6 +12,50 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
 
+import torch
+import torch.distributed as dist
+
+import torch
+import torch.distributed as dist
+
+def gather_dict_to_rank0(norm_info):
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    device = torch.device("cuda", rank)  # 適切なCUDAデバイスを設定
+    
+    # 勾配ノルムをCUDAデバイス上のテンソルに変換
+    grad_norm_tensor = torch.tensor([norm_info[f"norm_gpus/grad_norm_{rank}"]], dtype=torch.float32).to(device)
+    exp_norm_tensor = torch.tensor([norm_info[f"norm_gpus/momentum_norm_{rank}"]], dtype=torch.float32).to(device)
+    
+    if rank == 0:
+        # rank 0でgathered_tensorsをCUDAデバイス上に準備
+        gathered_tensors = [torch.zeros(1, dtype=torch.float32).to(device) for _ in range(world_size)]
+        dist.gather(grad_norm_tensor, gather_list=gathered_tensors, dst=0)
+        gathered_tensors_momentum = [torch.zeros(1, dtype=torch.float32).to(device) for _ in range(world_size)]
+        dist.gather(exp_norm_tensor, gather_list=gathered_tensors_momentum, dst=0)
+    else:
+        # 非宛先ランクではgather_listを指定しない
+        dist.gather(grad_norm_tensor, dst=0)
+        dist.gather(exp_norm_tensor, dst=0)
+    
+    if rank == 0:
+        combined_dict = {"iter": norm_info["iter"]}
+        for i, tensor in enumerate(gathered_tensors):
+            combined_dict[f"norm_gpus/grad_norm_{i}"] = tensor.item()
+        for i, tensor in enumerate(gathered_tensors_momentum):
+            combined_dict[f"norm_gpus/momentum_norm_{i}"] = tensor.item()
+        return combined_dict
+
+def calc_exp_stat_norm(optimizer):
+    def exists(val):
+        return val is not None
+    sum_norm = 0
+    for group in optimizer.param_groups:
+            for p in filter(lambda p: exists(p.grad), group["params"]):
+                exp_avg =  optimizer.state[p]["exp_avg"]
+                sum_norm += torch.norm(exp_avg)**2
+    return sum_norm**0.5
+
 # -----------------------------------------------------------------------------
 # Argument Parsing
 parser = argparse.ArgumentParser(description="Train a GPT model.")
@@ -83,6 +127,10 @@ if args.log_weight_iters == 'None':
     args.log_weight_iters = []
 else:
     args.log_weight_iters = args.log_weight_iters.split(',')
+if args.optimizer_name == 'lion_mshift' and args.momentum_sync_freq ==0:
+    args.optimizer_name = 'lion'
+if args.optimizer_name == 'lion_mvote' and args.momentum_sync_freq ==0:
+    args.optimizer_name = 'lion'
 
 # Use parsed arguments
 out_dir = args.out_dir
@@ -148,7 +196,9 @@ if master_process:
         import random, datetime
         dt_now = str(datetime.datetime.now()).replace(' ','-')
         args.out_dir=out_dir+'/'+dt_now
+        args.out_dirname=out_dir+'/'+dt_now
         out_dir = args.out_dir
+        out_dir_name = args.out_dir
     os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(5000 + seed_offset)
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
@@ -245,7 +295,7 @@ for name, param in model.named_parameters():
 cos_func = torch.nn.CosineSimilarity(dim=0)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+#scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
 
 # optimizer
 optimizer = model.configure_optimizers(optimizer_name, weight_decay, learning_rate, (beta1, beta2), rho, device_type)
@@ -371,27 +421,42 @@ while True:
             # the official way to do this is with model.no_sync() context manager, but
             # I really dislike that this bloats the code and forces us to repeat code
             # looking at the source of that context manager, it just toggles this variable
-            model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
+            if args.optimizer_name == 'lion_mshift' or args.optimizer_name == 'lion_mvote':
+                model.require_backward_grad_sync = False
+            else:
+                model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
             logits, loss = model(X, Y)
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
-        scaler.scale(loss).backward()
+        #scaler.scale(loss).backward()
+        loss.backward()
     # clip the gradient
     if grad_clip != 0.0:
-        scaler.unscale_(optimizer)
+        #scaler.unscale_(optimizer)
         total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         if total_norm.item() > grad_clip:
             clip_time += 1
     # step the optimizer and scaler if training in fp16
     if args.optimizer_name == 'lion_mshift' or args.optimizer_name == 'lion_mvote':
-        with model.no_sync():
-            scaler.step(optimizer, sync_momentum = iter_num % args.momentum_sync_freq)
-            scaler.update()
+        optimizer.step(sync_momentum = (iter_num % args.momentum_sync_freq==0))
+        #scaler.update()
     else:
-        scaler.step(optimizer)
-        scaler.update()
+        optimizer.step()
+        #scaler.step(optimizer)
+        #scaler.update()
+
+    exp_norm = calc_exp_stat_norm(optimizer)
+    norm_info = {
+        "iter": iter_num,
+        f"norm_gpus/grad_norm_{torch.distributed.get_rank()}" : total_norm,
+        f"norm_gpus/momentum_norm_{torch.distributed.get_rank()}" : exp_norm
+    }
+    combined_dict = gather_dict_to_rank0(norm_info)
+    # rank 0で結果を表示
+    if master_process and args.wandb:
+        wandb.log(combined_dict)
 
     if iter_num % log_interval == 0 and args.log_optimizer_state and master_process:
         if args.log_optimizer_state:

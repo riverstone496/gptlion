@@ -29,13 +29,9 @@ def update_fn(p, grad, exp_avg, lr, wd, beta1, beta2):
     p.add_(update, alpha=-lr)
 
     # decay the momentum running average coefficient
-
     exp_avg.mul_(beta2).add_(grad, alpha=1 - beta2)
 
-
 # class
-
-
 class Lion_mshift(Optimizer):
     def __init__(
         self, params, lr: float = 1e-4, betas: Tuple[float, float] = (0.9, 0.99), weight_decay: float = 0.0, use_triton: bool = False
@@ -66,7 +62,6 @@ class Lion_mshift(Optimizer):
             for p in filter(lambda p: exists(p.grad), group["params"]):
 
                 grad, lr, wd, beta1, beta2, state = p.grad, group["lr"], group["weight_decay"], *group["betas"], self.state[p]
-
                 # init state - exponential moving average of gradient values
 
                 if len(state) == 0:
@@ -78,7 +73,8 @@ class Lion_mshift(Optimizer):
 
                 # Sync exp_avg across GPUs
                 if sync_momentum and torch.distributed.is_initialized():
-                    all_reduce(state["exp_avg"], op=ReduceOp.SUM)
-                    state["exp_avg"] /= torch.distributed.get_world_size()
-
+                    exp_avg = state["exp_avg"]
+                    all_reduce(exp_avg, op=ReduceOp.SUM)
+                    exp_avg /= torch.distributed.get_world_size()
+                    state["exp_avg"] = exp_avg
         return loss
