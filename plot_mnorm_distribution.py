@@ -6,8 +6,8 @@ from model import GPTConfig, GPT
 import seaborn as sns
 import numpy as np
 
-sns.set()
-sns.set_context("paper", font_scale=0.75, rc={"lines.linewidth": 4})
+# sns.set()
+# sns.set_context("paper", font_scale=0.75, rc={"lines.linewidth": 4})
 
 plt.rcParams.update({
     "pgf.texsystem": "pdflatex",
@@ -50,8 +50,13 @@ def main():
     optimizer = model.configure_optimizers(config_dic['optimizer_name'], 0.1, 0.1, (0.9, 0.99), 0, device_type)
     optimizer.load_state_dict(optimizer_state_dict)
 
+    param_name_dict = {}
+    for name, param in model.named_parameters():
+        param_name_dict[param] = name
+    
     exp_avg_l1_norms = []
     exp_avg_l1_norms_max = []
+    exp_distribution = {}
     for group in optimizer.param_groups:
         for p in group["params"]:
             state = optimizer.state[p]
@@ -62,6 +67,10 @@ def main():
 
                 exp_avg_norm_l1_max = torch.abs(exp_avg).max().item()
                 exp_avg_l1_norms_max.append(exp_avg_norm_l1_max)
+
+                lname = param_name_dict[p]
+                if lname in ['transformer.wpe.weight', 'transformer.h.0.attn.c_attn.weight', 'transformer.h.0.mlp.c_fc.weight', 'transformer.h.0.ln_1.weight']:
+                    exp_distribution[lname] = exp_avg
 
     fig, axs = plt.subplots(1, 4, figsize=(6, 2))
 
@@ -91,6 +100,19 @@ def main():
     with PdfPages('./graphs/norms_distribution.pdf') as pdf:
         pdf.savefig()
         plt.close()
+
+    fig, axs = plt.subplots(1, len(exp_distribution), figsize=(6, 2))
+    idx = 0
+    for (name, pdis) in exp_distribution.items():
+        # exp_avgのL1ノルムの分布、i=0は通常スケール、i=1はログスケール
+        axs[idx].hist(pdis)
+        axs[idx].set_title(f'{name.replace("transformer.","").replace("weight","")}')
+        axs[idx].set_xlabel('Norm Value')
+        idx += 1
+    with PdfPages('./graphs/mom_distribution.pdf') as pdf:
+        pdf.savefig()
+        plt.close()
+
 
 if __name__ == "__main__":
     main()
